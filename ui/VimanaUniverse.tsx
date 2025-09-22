@@ -12,6 +12,13 @@ import {
   Play,
   Pause,
   Send,
+  Gauge,
+  Flag,
+  Navigation2,
+  Shield as ShieldIcon,
+  Flame,
+  Zap,
+  Thermometer,
 } from "lucide-react";
 
 /**
@@ -65,10 +72,20 @@ type Cell = {
   novelty: number; // 0..1
 };
 
+type Waypoint = { x: number; y: number } | null;
+
 type Vimana = {
-  x: number;
+  x: number; // continuous position in grid space
   y: number;
   heading: number; // degrees 0..360
+  throttle: number; // 0..1
+  speed: number; // cells / second
+  hull: number; // 0..1
+  shield: number; // 0..1
+  heat: number; // 0..1
+  fuel: number; // 0..1
+  autopilot: boolean;
+  waypoint: Waypoint;
   ageHours: number; // in-world time (for flavor)
 };
 
@@ -102,8 +119,18 @@ export default function VimanaUniverse() {
     x: Math.floor(24 / 2),
     y: Math.floor(16 / 2),
     heading: 0,
+    throttle: 0.2,
+    speed: 0,
+    hull: 1,
+    shield: 0.85,
+    heat: 0.1,
+    fuel: 1,
+    autopilot: false,
+    waypoint: null,
     ageHours: 0,
   });
+
+  const [boosting, setBoosting] = useState(false);
 
   // Communications
   const [messages, setMessages] = useState<Message[]>([
@@ -137,6 +164,20 @@ export default function VimanaUniverse() {
   const [grid, setGrid] = useState<Cell[]>(baseGrid);
   useEffect(() => setGrid(baseGrid), [baseGrid]);
 
+  useEffect(() => {
+    setVimana((v) => ({
+      ...v,
+      x: clampFloat(v.x, 0, cols - 1),
+      y: clampFloat(v.y, 0, rows - 1),
+      waypoint: v.waypoint
+        ? {
+            x: clampFloat(v.waypoint.x, 0, cols - 1),
+            y: clampFloat(v.waypoint.y, 0, rows - 1),
+          }
+        : null,
+    }));
+  }, [cols, rows]);
+
   // ψ calculator
   const psiOf = (cell: Cell) => {
     const wE = solar;
@@ -150,12 +191,106 @@ export default function VimanaUniverse() {
 
   // Tick loop (age + subtle drift)
   useInterval(() => {
-    // age + micro drift toward base
-    setVimana((v) => ({ ...v, ageHours: v.ageHours + tickMs / 1000 / 60 / 60 }));
-    setGrid((prev) =>
-      prev.map((cell, i) => {
+    const dt = tickMs / 1000;
+    const hoursStep = tickMs / 1000 / 60 / 60;
+    let autopArrived = false;
+    let stopBoost = false;
+    let latestPosition = { x: vimana.x, y: vimana.y };
+
+    setVimana((v) => {
+      const cellX = clampInt(Math.round(v.x), 0, cols - 1);
+      const cellY = clampInt(Math.round(v.y), 0, rows - 1);
+      const cellIdx = cellY * cols + cellX;
+      const cell = grid[cellIdx] ?? baseGrid[cellIdx];
+
+      const envEnergy = cell?.energy ?? 0.5;
+      const envEntropy = cell?.entropy ?? 0.5;
+      const envCohesion = cell?.cohesion ?? 0.5;
+      const envNovelty = cell?.novelty ?? 0.5;
+
+      let heading = v.heading;
+      let throttle = v.throttle;
+      let autopilot = v.autopilot;
+      let waypoint = v.waypoint;
+
+      if (autopilot && !waypoint) {
+        autopilot = false;
+      }
+
+      if (autopilot && waypoint) {
+        const dx = waypoint.x - v.x;
+        const dy = waypoint.y - v.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance < 0.25) {
+          autopilot = false;
+          waypoint = null;
+          throttle = Math.min(throttle, 0.25);
+          autopArrived = true;
+        } else {
+          const desired = (Math.atan2(dy, dx) * 180) / Math.PI;
+          heading = rotateToward(heading, desired, 120 * dt);
+          throttle = Math.max(throttle, 0.45);
+        }
+      }
+
+      const boostActive = boosting && v.fuel > 0.02;
+      if (boosting && !boostActive) {
+        stopBoost = true;
+      }
+
+      const envSpeedMod = 1 + (envEnergy - 0.5) * 0.35 + (envNovelty - 0.5) * 0.15;
+      const boostMultiplier = boostActive ? 1.6 : 1;
+      const maxSpeed = 3.2 * envSpeedMod * boostMultiplier;
+      const accel = 3.1;
+      const targetSpeed = throttle * maxSpeed;
+      const speed = approach(v.speed, targetSpeed, accel * dt);
+
+      const rad = (heading * Math.PI) / 180;
+      let nx = v.x + Math.cos(rad) * speed * dt;
+      let ny = v.y + Math.sin(rad) * speed * dt;
+      nx = clampFloat(nx, 0, cols - 1);
+      ny = clampFloat(ny, 0, rows - 1);
+
+      latestPosition = { x: nx, y: ny };
+
+      let heat = clamp01(v.heat + ((envEntropy - 0.5) * 0.2 + speed * 0.04 + (boostActive ? 0.25 : -0.03)) * dt);
+      let shield = clamp01(
+        v.shield + (envCohesion - 0.45) * dt * 0.6 - heat * dt * 0.22 - (boostActive ? dt * 0.12 : 0),
+      );
+
+      let hull = v.hull;
+      if (heat > 0.8 && shield < 0.4) {
+        hull = clamp01(hull - dt * 0.08 * (heat - 0.75));
+      } else if (envCohesion > 0.65 && heat < 0.4 && hull < 1) {
+        hull = clamp01(hull + dt * 0.03 * (envCohesion - 0.6));
+      }
+
+      let fuel = clamp01(v.fuel - dt * (0.04 + throttle * 0.06) - (boostActive ? dt * 0.18 : 0));
+      if (boostActive && fuel <= 0.02) {
+        fuel = 0;
+        stopBoost = true;
+      }
+
+      return {
+        ...v,
+        x: nx,
+        y: ny,
+        heading,
+        throttle,
+        speed,
+        heat,
+        shield,
+        hull,
+        fuel,
+        autopilot,
+        waypoint,
+        ageHours: v.ageHours + hoursStep,
+      };
+    });
+
+    setGrid((prev) => {
+      const drifted = prev.map((cell, i) => {
         const base = baseGrid[i];
-        // relax toward base with tiny rate, keeping perturbations alive
         const rate = 0.002;
         return {
           ...cell,
@@ -164,44 +299,123 @@ export default function VimanaUniverse() {
           cohesion: lerp(cell.cohesion, base.cohesion, rate),
           novelty: lerp(cell.novelty, base.novelty, rate),
         };
-      }),
-    );
+      });
+
+      if (boosting) {
+        const cx = clampInt(Math.round(latestPosition.x), 0, cols - 1);
+        const cy = clampInt(Math.round(latestPosition.y), 0, rows - 1);
+        const radius = 1;
+        for (let y = Math.max(0, cy - radius); y <= Math.min(rows - 1, cy + radius); y++) {
+          for (let x = Math.max(0, cx - radius); x <= Math.min(cols - 1, cx + radius); x++) {
+            const dist = Math.hypot(x - latestPosition.x, y - latestPosition.y);
+            const fall = Math.max(0, 1 - dist / (radius + 0.001));
+            const index = y * cols + x;
+            const c = drifted[index];
+            drifted[index] = {
+              ...c,
+              entropy: clamp01(c.entropy + 0.04 * fall),
+              novelty: clamp01(c.novelty + 0.05 * fall),
+            };
+          }
+        }
+      }
+
+      return drifted;
+    });
+
+    if (stopBoost) {
+      setBoosting(false);
+      addMsg("system", "Fuel reserves unable to sustain boost.");
+    }
+    if (autopArrived) {
+      addMsg("system", "Waypoint reached. Autopilot disengaged.");
+    }
   }, running ? tickMs : null);
 
-  // Keyboard movement & scan
+  // Keyboard flight controls & scan
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) return;
       if (e.key === " ") {
         e.preventDefault();
         performScan();
         return;
       }
-      const { x, y } = vimana;
-      let dx = 0,
-        dy = 0;
-      if (e.key === "ArrowUp" || e.key.toLowerCase() === "w") dy = -1;
-      if (e.key === "ArrowDown" || e.key.toLowerCase() === "s") dy = +1;
-      if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") dx = -1;
-      if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") dx = +1;
-      if (dx !== 0 || dy !== 0) {
-        moveBy(dx, dy);
-      }
       if (e.key === "Enter" && draft.trim()) {
         sendMessage();
+        return;
+      }
+      if (e.key === "Shift") {
+        e.preventDefault();
+        setBoosting(true);
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if (key === "q") adjustThrottle(-0.1);
+      if (key === "e") adjustThrottle(0.1);
+      if (key === "w" || e.key === "ArrowUp") adjustThrottle(0.05);
+      if (key === "s" || e.key === "ArrowDown") adjustThrottle(-0.05);
+      if (key === "a" || e.key === "ArrowLeft") rotateHeadingBy(-8);
+      if (key === "d" || e.key === "ArrowRight") rotateHeadingBy(8);
+      if (key === "f") toggleAutopilot();
+      if (key === "r") clearWaypoint();
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") {
+        setBoosting(false);
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [vimana, draft]);
 
-  function moveBy(dx: number, dy: number) {
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [draft, performScan, sendMessage, adjustThrottle, rotateHeadingBy, toggleAutopilot, clearWaypoint]);
+
+  function setThrottle(value: number) {
+    setVimana((v) => ({ ...v, throttle: clamp01(value) }));
+  }
+
+  function adjustThrottle(delta: number) {
+    setVimana((v) => ({ ...v, throttle: clamp01(v.throttle + delta) }));
+  }
+
+  function rotateHeadingBy(delta: number) {
+    setVimana((v) => ({ ...v, heading: (v.heading + delta + 360) % 360 }));
+  }
+
+  function toggleAutopilot() {
+    let message: string | null = null;
     setVimana((v) => {
-      const nx = clampInt(v.x + dx, 0, cols - 1);
-      const ny = clampInt(v.y + dy, 0, rows - 1);
-      const heading = dx === 0 && dy === 0 ? v.heading : (Math.atan2(dy, dx) * 180) / Math.PI;
-      return { ...v, x: nx, y: ny, heading };
+      if (!v.waypoint && !v.autopilot) {
+        message = "No waypoint set.";
+        return v;
+      }
+      const autopilot = !v.autopilot;
+      message = autopilot ? "Autopilot engaged." : "Autopilot disengaged.";
+      return { ...v, autopilot };
     });
+    if (message) addMsg("system", message);
+  }
+
+  function clearWaypoint() {
+    let cleared = false;
+    setVimana((v) => {
+      if (!v.waypoint && !v.autopilot) {
+        return v;
+      }
+      cleared = true;
+      return { ...v, waypoint: null, autopilot: false };
+    });
+    if (cleared) addMsg("system", "Waypoint cleared.");
+  }
+
+  function setWaypoint(x: number, y: number) {
+    setVimana((v) => ({ ...v, waypoint: { x, y } }));
+    addMsg("system", `Waypoint set to (${x},${y}).`);
   }
 
   function performScan() {
@@ -297,7 +511,22 @@ export default function VimanaUniverse() {
           setCols(data.meta.cols);
           setRows(data.meta.rows);
           setSeed(data.meta.seed ?? seed);
-          setVimana(data.vimana ?? vimana);
+          setVimana((prev) => ({
+            ...prev,
+            ...(data.vimana ?? {}),
+            x: data.vimana?.x ?? prev.x,
+            y: data.vimana?.y ?? prev.y,
+            heading: data.vimana?.heading ?? prev.heading,
+            throttle: clamp01(data.vimana?.throttle ?? prev.throttle ?? 0.2),
+            speed: data.vimana?.speed ?? 0,
+            hull: clamp01(data.vimana?.hull ?? prev.hull ?? 1),
+            shield: clamp01(data.vimana?.shield ?? prev.shield ?? 0.85),
+            heat: clamp01(data.vimana?.heat ?? prev.heat ?? 0.1),
+            fuel: clamp01(data.vimana?.fuel ?? prev.fuel ?? 1),
+            autopilot: data.vimana?.autopilot ?? false,
+            waypoint: data.vimana?.waypoint ?? null,
+            ageHours: data.vimana?.ageHours ?? prev.ageHours,
+          }));
           setGrid(data.grid);
           setMessages(data.messages ?? messages);
           const p = data.params ?? {};
@@ -315,8 +544,21 @@ export default function VimanaUniverse() {
     reader.readAsText(file);
   }
 
-  const selectedCell = grid[vimana.y * cols + vimana.x];
+  const cellX = clampInt(Math.round(vimana.x), 0, cols - 1);
+  const cellY = clampInt(Math.round(vimana.y), 0, rows - 1);
+  const selectedCell = grid[cellY * cols + cellX];
   const psiHere = selectedCell ? psiOf(selectedCell) : 0;
+  const envSpeedMod = selectedCell
+    ? 1 + (selectedCell.energy - 0.5) * 0.35 + (selectedCell.novelty - 0.5) * 0.15
+    : 1;
+  const speedCap = 3.2 * envSpeedMod * (boosting ? 1.6 : 1);
+  const waypointDistance = vimana.waypoint
+    ? Math.hypot(vimana.waypoint.x - vimana.x, vimana.waypoint.y - vimana.y)
+    : null;
+  const hasWaypoint = Boolean(vimana.waypoint);
+  const canClearWaypoint = hasWaypoint || vimana.autopilot;
+  const autopStatusText = vimana.autopilot ? "Autopilot: Engaged" : "Autopilot: Manual";
+  const autopButtonLabel = vimana.autopilot ? "Disengage AP" : "Engage AP";
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-slate-900 via-[#0a0f1f] to-slate-900 text-slate-100 p-4 md:p-6">
@@ -393,10 +635,109 @@ export default function VimanaUniverse() {
 
           <SectionTitle icon={<Compass className="w-4 h-4" />} title="Vimana" />
           <div className="grid grid-cols-3 gap-3 text-sm">
-            <Stat label="X" value={vimana.x} />
-            <Stat label="Y" value={vimana.y} />
+            <Stat label="X" value={vimana.x.toFixed(2)} />
+            <Stat label="Y" value={vimana.y.toFixed(2)} />
             <Stat label="Heading" value={`${Math.round((vimana.heading + 360) % 360)}°`} />
           </div>
+
+          <SectionTitle icon={<Gauge className="w-4 h-4" />} title="Vehicle Systems" />
+          <div className="space-y-3">
+            <div className="rounded-xl bg-slate-800/60 border border-slate-700 p-3 space-y-3">
+              <div>
+                <div className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-200">
+                  <span className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-amber-300" />
+                    Throttle
+                  </span>
+                  <span>{Math.round(vimana.throttle * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={vimana.throttle}
+                  onChange={(e) => setThrottle(Number(e.target.value))}
+                  className="mt-2 w-full accent-amber-300"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <button
+                  onClick={toggleAutopilot}
+                  disabled={!vimana.autopilot && !hasWaypoint}
+                  className={`rounded-lg border px-2 py-2 transition ${
+                    vimana.autopilot
+                      ? "bg-emerald-600/20 border-emerald-500/30 text-emerald-200 hover:bg-emerald-600/30"
+                      : hasWaypoint
+                      ? "bg-slate-900/60 border-slate-700 text-slate-200 hover:bg-slate-900"
+                      : "bg-slate-900/20 border-slate-800 text-slate-500 cursor-not-allowed"
+                  }`}
+                >
+                  <span className="flex items-center justify-center gap-1">
+                    <Navigation2 className="w-3.5 h-3.5" />
+                    {autopButtonLabel}
+                  </span>
+                </button>
+                <button
+                  onClick={clearWaypoint}
+                  disabled={!canClearWaypoint}
+                  className={`rounded-lg border px-2 py-2 transition ${
+                    canClearWaypoint
+                      ? "bg-slate-900/60 border-slate-700 text-slate-200 hover:bg-slate-900"
+                      : "bg-slate-900/20 border-slate-800 text-slate-500 cursor-not-allowed"
+                  }`}
+                >
+                  <span className="flex items-center justify-center gap-1">
+                    <Flag className="w-3.5 h-3.5" />
+                    Clear Waypoint
+                  </span>
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-1 text-[11px] text-slate-300 sm:grid-cols-2">
+                <div className="flex items-center gap-2">
+                  <Navigation2 className="w-3 h-3 text-cyan-300" />
+                  {autopStatusText}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Flag className="w-3 h-3 text-amber-300" />
+                  {vimana.waypoint ? `Waypoint (${vimana.waypoint.x},${vimana.waypoint.y})` : "No waypoint"}
+                </div>
+                {waypointDistance !== null && (
+                  <div className="flex items-center gap-2 text-emerald-200 sm:col-span-2">
+                    <Gauge className="w-3 h-3" />
+                    Distance {waypointDistance.toFixed(2)} cells
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <VitalBar
+                label="Fuel"
+                value={vimana.fuel}
+                gradient="from-amber-400 via-amber-500 to-orange-500"
+                icon={<Flame className="w-4 h-4 text-amber-300" />}
+              />
+              <VitalBar
+                label="Shield"
+                value={vimana.shield}
+                gradient="from-cyan-300 via-sky-400 to-blue-500"
+                icon={<ShieldIcon className="w-4 h-4 text-cyan-300" />}
+              />
+              <VitalBar
+                label="Hull"
+                value={vimana.hull}
+                gradient="from-lime-300 via-emerald-400 to-teal-500"
+                icon={<Rocket className="w-4 h-4 text-emerald-300" />}
+              />
+              <VitalBar
+                label="Heat"
+                value={vimana.heat}
+                gradient="from-rose-400 via-orange-500 to-amber-500"
+                icon={<Thermometer className="w-4 h-4 text-rose-300" />}
+              />
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <LayerPicker selected={selectedLayer} onChange={setSelectedLayer} />
             <div className="rounded-xl bg-slate-800/60 border border-slate-700 p-3">
@@ -423,10 +764,16 @@ export default function VimanaUniverse() {
             <SliderField label="Aether" value={aether} setValue={setAether} min={0} max={1} step={0.01} />
           </div>
 
-          <div className="rounded-xl bg-slate-800/60 border border-slate-700 p-3 text-xs leading-relaxed">
-            <p className="text-slate-300">
-              <b>Controls:</b> WASD/Arrows move · <b>Space</b> scan · <b>Enter</b> send · Click a cell to move.
-            </p>
+          <div className="rounded-xl bg-slate-800/60 border border-slate-700 p-3 text-xs">
+            <p className="text-slate-300 font-semibold uppercase tracking-wide">Flight Controls</p>
+            <ul className="mt-2 space-y-1 text-[11px] text-slate-400">
+              <li><span className="text-slate-200">Q / E</span> — throttle down / up</li>
+              <li><span className="text-slate-200">W / S</span> or <span className="text-slate-200">↑ / ↓</span> — fine throttle trim</li>
+              <li><span className="text-slate-200">A / D</span> or <span className="text-slate-200">← / →</span> — adjust heading</li>
+              <li><span className="text-slate-200">Shift</span> — hold to boost</li>
+              <li><span className="text-slate-200">Space</span> — scan pulse · <span className="text-slate-200">F</span> — toggle autopilot · <span className="text-slate-200">R</span> — clear waypoint</li>
+              <li><span className="text-slate-200">Enter</span> — send comms · click cell — dev jump · right-click — set waypoint</li>
+            </ul>
           </div>
         </div>
 
@@ -435,6 +782,52 @@ export default function VimanaUniverse() {
           <SectionTitle icon={<MapIcon className="w-4 h-4" />} title="Sector Map" />
           <div className="relative flex-1 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/40">
             <Starfield />
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center p-4">
+              <div className="w-full max-w-lg rounded-2xl border border-cyan-500/30 bg-slate-950/80 px-4 py-3 shadow-lg backdrop-blur">
+                <div className="flex flex-col gap-2 text-xs md:text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] uppercase tracking-wide text-cyan-200">
+                    <span className="flex items-center gap-2">
+                      <Navigation2 className="w-4 h-4" />
+                      Heading {Math.round((vimana.heading + 360) % 360)}°
+                    </span>
+                    <span className={`font-semibold ${vimana.autopilot ? "text-emerald-300" : "text-cyan-200"}`}>
+                      {vimana.autopilot ? "Autopilot" : "Manual"}
+                    </span>
+                    {boosting && (
+                      <span className="flex items-center gap-1 text-amber-300">
+                        <Flame className="w-3.5 h-3.5" />
+                        Boost
+                      </span>
+                    )}
+                  </div>
+                  <HudBar
+                    icon={<Gauge className="w-4 h-4 text-cyan-300" />}
+                    label="Speed"
+                    value={vimana.speed}
+                    max={speedCap}
+                    accent="bg-gradient-to-r from-cyan-300 via-sky-400 to-blue-500"
+                    format={(value) => `${value.toFixed(2)} c/s`}
+                  />
+                  <HudBar
+                    icon={<Zap className="w-4 h-4 text-amber-300" />}
+                    label="Throttle"
+                    value={vimana.throttle}
+                    max={1}
+                    accent="bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500"
+                    format={(value) => `${Math.round(value * 100)}%`}
+                  />
+                  {hasWaypoint && waypointDistance !== null && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300">
+                      <span className="flex items-center gap-2">
+                        <Flag className="w-3.5 h-3.5 text-amber-300" />
+                        Waypoint ({vimana.waypoint?.x}, {vimana.waypoint?.y})
+                      </span>
+                      <span>{waypointDistance.toFixed(2)} cells</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
             <div
               className="grid absolute inset-0"
               style={{
@@ -444,7 +837,8 @@ export default function VimanaUniverse() {
             >
               {grid.map((cell) => {
                 const key = `${cell.x}-${cell.y}`;
-                const isHere = cell.x === vimana.x && cell.y === vimana.y;
+                const isHere = cell.x === cellX && cell.y === cellY;
+                const isWaypoint = vimana.waypoint && cell.x === vimana.waypoint.x && cell.y === vimana.waypoint.y;
                 return (
                   <div
                     key={key}
@@ -453,11 +847,20 @@ export default function VimanaUniverse() {
                     }`}
                     style={{ backgroundColor: cellColor(cell) }}
                     onClick={() => setVimana((v) => ({ ...v, x: cell.x, y: cell.y }))}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setWaypoint(cell.x, cell.y);
+                    }}
                     title={`(${cell.x},${cell.y})`}
                   >
                     {isHere && (
                       <div className="absolute inset-0 flex items-center justify-center">
                         <VimanaGlyph heading={vimana.heading} />
+                      </div>
+                    )}
+                    {isWaypoint && (
+                      <div className="absolute top-1 right-1 text-amber-300 drop-shadow">
+                        <Flag className="w-3 h-3" />
                       </div>
                     )}
                   </div>
@@ -668,6 +1071,66 @@ function Bar({ label, v }: { label: string; v: number }) {
   );
 }
 
+function HudBar({
+  icon,
+  label,
+  value,
+  max,
+  accent,
+  format,
+}: {
+  icon?: React.ReactNode;
+  label: string;
+  value: number;
+  max: number;
+  accent: string;
+  format?: (value: number, max: number) => string;
+}) {
+  const ratio = max > 0 ? clamp01(value / max) : 0;
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-300">
+        <span className="flex items-center gap-1">
+          {icon}
+          {label}
+        </span>
+        <span>{format ? format(value, max) : `${Math.round(ratio * 100)}%`}</span>
+      </div>
+      <div className="h-1.5 bg-slate-800 rounded overflow-hidden">
+        <div className={`h-full ${accent}`} style={{ width: `${ratio * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function VitalBar({
+  label,
+  value,
+  gradient,
+  icon,
+}: {
+  label: string;
+  value: number;
+  gradient: string;
+  icon?: React.ReactNode;
+}) {
+  const pct = clamp01(value) * 100;
+  return (
+    <div className="rounded-xl bg-slate-800/60 border border-slate-700 p-3">
+      <div className="flex items-center justify-between text-xs mb-2 text-slate-200">
+        <span className="flex items-center gap-2">
+          {icon}
+          {label}
+        </span>
+        <span>{Math.round(pct)}%</span>
+      </div>
+      <div className="h-2 bg-slate-700 rounded overflow-hidden">
+        <div className={`h-full bg-gradient-to-r ${gradient}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 // ---------- Math helpers ----------
 function clamp01(v: number) {
   return Math.max(0, Math.min(1, v));
@@ -675,8 +1138,24 @@ function clamp01(v: number) {
 function clampInt(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
+function clampFloat(v: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, v));
+}
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
+}
+function approach(current: number, target: number, maxDelta: number) {
+  if (current < target) return Math.min(target, current + maxDelta);
+  if (current > target) return Math.max(target, current - maxDelta);
+  return target;
+}
+function rotateToward(current: number, target: number, maxDelta: number) {
+  let diff = ((target - current + 540) % 360) - 180;
+  if (Math.abs(diff) <= maxDelta) {
+    return (target + 360) % 360;
+  }
+  const step = Math.sign(diff) * maxDelta;
+  return (current + step + 360) % 360;
 }
 function cryptoId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
