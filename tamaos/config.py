@@ -42,6 +42,16 @@ def _get_str(name: str, default: str) -> str:
     return value if value not in (None, "") else default
 
 
+def _get_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized == "":
+        return default
+    return normalized in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     """Resolved configuration values for TamaOS."""
@@ -53,6 +63,8 @@ class Settings:
     log_path: Path
     tamaos_name: str
     log_level: str
+    ui_skin: str
+    animate_ui: bool
 
     def ensure_runtime_paths(self) -> None:
         """Create runtime directories if they do not exist."""
@@ -73,7 +85,9 @@ class Settings:
             f"  vfs_path: {self.vfs_path}\n"
             f"  log_path: {self.log_path}\n"
             f"  tamaos_name: {self.tamaos_name}\n"
-            f"  log_level: {self.log_level}"
+            f"  log_level: {self.log_level}\n"
+            f"  ui_skin: {self.ui_skin}\n"
+            f"  animate_ui: {self.animate_ui}"
         )
 
 
@@ -89,4 +103,6 @@ settings = Settings(
     log_path=_get_path("LOG_PATH", _default_logs),
     tamaos_name=_get_str("TAMAOS_NAME", "TamaOS"),
     log_level=_get_str("LOG_LEVEL", "INFO"),
+    ui_skin=_get_str("TAMAOS_UI_SKIN", "classic").lower(),
+    animate_ui=_get_bool("TAMAOS_ANIMATE_UI", True),
 )

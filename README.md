@@ -32,6 +32,8 @@ values keep the project self-contained when nothing is specified.
 | `LOG_PATH`          | Directory used for runtime logs                                | `./logs`        |
 | `TAMAOS_NAME`       | Display name for the boot banner                               | `TamaOS`        |
 | `LOG_LEVEL`         | Logging verbosity hint for future services                     | `INFO`          |
+| `TAMAOS_UI_SKIN`    | Default UI skin rendered around the shell banner                | `classic`       |
+| `TAMAOS_ANIMATE_UI` | Whether to play banner animations on startup (`true`/`false`)   | `true`          |
 
 Create a `.env` file based on `.env.example` to override these locally without exporting
 them in your shell.
@@ -45,3 +47,19 @@ them in your shell.
 5. Runs a smoke test that imports `tamaos.config` and prints the resolved configuration.
 
 After the script completes, the repository is ready for you to extend the agent kernel.
+
+## Styling the shell
+
+The stub REPL now supports playful banner skins and boot animations. Use the `skin`
+command inside the shell to explore the options:
+
+```text
+skin list           # Show all available skins and their descriptions
+skin use synthwave  # Switch to the "synthwave" skin and redraw the banner
+skin show           # Re-render the banner with the currently selected skin
+skin animate off    # Disable or re-enable the introductory animation
+```
+
+Set the default skin and animation behaviour with the `TAMAOS_UI_SKIN` and
+`TAMAOS_ANIMATE_UI` environment variables (see the table above) if you want the
+shell to boot directly into a specific vibe.
