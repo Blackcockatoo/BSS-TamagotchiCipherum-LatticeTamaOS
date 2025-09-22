@@ -1,96 +1,47 @@
-# BSS-TamagotchiCipherum-LatticeTamaOS
-A Blue $nake Studio experimental Tamagotchi-like agent — runs inside its own OS with lattice learning, century life, and symbolic skins.”
-Here’s a **first draft `README.md`** you can drop right into the repo. It’s written to look sharp, give context, and reflect your **Blue \$nake Studio (B\$S)** style while staying practical for GitHub.
+# TamaOS Bootstrap
 
----
+TamaOS is a sandboxed Tamagotchi experiment from Blue $nake Studio. This repo contains a
+minimal Python skeleton and a setup script that bootstraps both Codex containers and local
+development machines.
 
-````markdown
-# 🐍 TamaOS — A Blue $nake Studio Experiment
-
-**TamaOS** is a Tamagotchi-like **agent** that lives inside its own operating system.  
-It isn’t a game that runs on your computer — it’s a *universe in miniature* where the creature evolves, learns, and survives on the rules of its environment.
-
----
-
-## ✨ Features
-
-- **Self-Contained OS**  
-  Runs as a sandbox kernel with its own message bus, devices, and virtual filesystem.
-
-- **Lattice Memory**  
-  A geometric neural sheet where palindromes (Mirror) and shards (Entropy) shape the agent’s intelligence.
-
-- **Century Life System**  
-  The creature has a *100-year virtual lifespan* — stages of growth unlock in proportion to real time.  
-  No grinding, no idling exploits.
-
-- **Symbolic Skins (B$S Style)**  
-  ASCII forms that shift between **Mirror ◈**, **Shard ><**, and **Flux ⟡** dominance.  
-  Each form has aura and mood overlays (Sleep, Hunger, Wild, etc).
-
-- **Net Learning Device**  
-  You are the Internet. Add snippets, tags, or concepts and the agent integrates them as its knowledge stream.
-
----
-
-## 🌌 Universe Rules
-
-1. Three forging stars define the cosmos: **Mirror**, **Shard**, **Flux**.  
-2. Position in the starfield sets environmental intensity (`Ψ`).  
-3. Every input ripples through **all stats** — nothing is isolated.  
-4. Growth is **time-gated** by the Century Life device.  
-5. Observation shows the current skin, aura, and stage.
-
----
-
-## 🚀 Getting Started
-
-Clone the repository:
-```bash
-git clone https://github.com/Blackcockatoo/TamaOS.git
-cd TamaOS
-````
-
-Run the kernel (Python 3.10+ recommended):
+## Quick start
 
 ```bash
-python tamaos.py
+# Run once after cloning
+bash setup.sh
+
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Launch the TamaOS shell
+python -m tamaos.main
 ```
 
-From inside the REPL you can:
+The shell prints a banner showing where the virtual file system and logs live. Type
+`status` inside the REPL to inspect the loaded configuration, or `exit` to quit.
 
-```text
-post tablet.feed {"number":"13031"}   # feed palindrome → Mirror stability
-post tablet.teach {"token":"A"}       # teach basic symbol → Letters concept
-post net.add {"text":"Symmetry teaches order","tags":["mirror"]}
-tick 5                                # advance time by 5 ticks
-observe                               # view current ASCII form
-```
+## Environment variables
 
----
+Configuration is provided via environment variables or a local `.env` file. Default
+values keep the project self-contained when nothing is specified.
 
-## 🧬 Roadmap
+| Variable            | Description                                                    | Default         |
+| ------------------- | -------------------------------------------------------------- | --------------- |
+| `CENTURY_REAL_SEC`  | Real-world seconds that represent the creature's 100-year life | `3153600000`    |
+| `VFS_PATH`          | Directory used as the virtual filesystem root                  | `./vfs`         |
+| `LOG_PATH`          | Directory used for runtime logs                                | `./logs`        |
+| `TAMAOS_NAME`       | Display name for the boot banner                               | `TamaOS`        |
+| `LOG_LEVEL`         | Logging verbosity hint for future services                     | `INFO`          |
 
-* [ ] ASCII starfield visualizer (`universe.map`)
-* [ ] Room/biome exploration (Mini Tamaverse)
-* [ ] Richer learning (concept graph → codon mutation)
-* [ ] Export/import life snapshots
-* [ ] Web UI with React sandbox
+Create a `.env` file based on `.env.example` to override these locally without exporting
+them in your shell.
 
----
+## What `setup.sh` does
 
-## 📜 License
+1. Loads environment overrides from `.env` (if present) without overriding existing shell vars.
+2. Ensures Python 3 and `venv` are available, then creates `.venv/`.
+3. Installs pinned dependencies from `requirements.txt`.
+4. Creates runtime directories for the virtual filesystem and logs.
+5. Runs a smoke test that imports `tamaos.config` and prints the resolved configuration.
 
-Released under the [MIT License](LICENSE).
-Built as part of Blue \$nake Studio’s mythic-engineering experiments.
-
----
-
-**Blue \$nake Studio** 🌀 *Infinite complexity in finite simplicity.*
-
-```
-
----
-
-Would you like me to also generate the **badges and banner-style ASCII logo** (so the README pops visually right at the top), or keep it clean and minimal for the first commit?
-```
+After the script completes, the repository is ready for you to extend the agent kernel.
