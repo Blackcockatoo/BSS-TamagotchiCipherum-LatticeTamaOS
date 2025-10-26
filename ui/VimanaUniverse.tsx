@@ -162,7 +162,14 @@ export default function VimanaUniverse() {
 
   // Mutable grid (perturbed by scans & moves)
   const [grid, setGrid] = useState<Cell[]>(baseGrid);
-  useEffect(() => setGrid(baseGrid), [baseGrid]);
+  const skipNextGridSync = useRef(false);
+  useEffect(() => {
+    if (skipNextGridSync.current) {
+      skipNextGridSync.current = false;
+      return;
+    }
+    setGrid(baseGrid);
+  }, [baseGrid]);
 
   useEffect(() => {
     setVimana((v) => ({
@@ -527,6 +534,7 @@ export default function VimanaUniverse() {
             waypoint: data.vimana?.waypoint ?? null,
             ageHours: data.vimana?.ageHours ?? prev.ageHours,
           }));
+          skipNextGridSync.current = true;
           setGrid(data.grid);
           setMessages(data.messages ?? messages);
           const p = data.params ?? {};
