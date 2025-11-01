@@ -2,7 +2,6 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -14,15 +13,18 @@ import {
   SprayCan,
   RotateCcw,
   Sparkles,
+  Volume2,
+  VolumeX,
   Gauge,
   Settings,
   Clock,
   Shield,
+  Swords,
   Zap,
   Dna,
   Copy,
-  Upload,
-  Archive,
+  Microscope,
+  Code,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,154 +36,47 @@ import {
 } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 
-const BASE60_ALPHABET =
-  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx";
-
-function seededRandom(seed: number) {
-  let state = seed >>> 0;
-  return () => {
-    state = (state * 1664525 + 1013904223) % 4294967296;
-    return state / 4294967296;
-  };
-}
-
-function generateGenome(seed: number) {
-  const rng = seededRandom(seed);
-  return Array.from({ length: 16 }, () => Math.floor(rng() * 256));
-}
-
-function genomeToBase60(bytes: number[]) {
-  let value = 0n;
-  for (const byte of bytes) value = (value << 8n) | BigInt(byte);
-  if (value === 0n) return BASE60_ALPHABET[0].repeat(22);
-  let result = "";
-  while (value > 0n) {
-    result = BASE60_ALPHABET[Number(value % 60n)] + result;
-    value = value / 60n;
-  }
-  return result.padStart(22, BASE60_ALPHABET[0]);
-}
-
-function base60ToGenome(str: string) {
-  let value = 0n;
-  for (const char of str) {
-    const idx = BASE60_ALPHABET.indexOf(char);
-    if (idx === -1) throw new Error("Invalid base60 character");
-    value = value * 60n + BigInt(idx);
-  }
-  const bytes: number[] = [];
-  for (let i = 0; i < 16; i++) {
-    bytes.unshift(Number(value & 0xffn));
-    value = value >> 8n;
-  }
-  return bytes;
-}
-
-function mutateGenome(genome: number[], rate: number) {
-  const mutated = [...genome];
-  for (let i = 0; i < mutated.length; i++) {
-    if (Math.random() < rate) {
-      const flip = Math.floor(Math.random() * 8);
-      mutated[i] ^= 1 << flip;
-    }
-  }
-  return mutated;
-}
-
-const CODON_TABLE: Record<string, string> = {
-  TTT: "F",
-  TTC: "F",
-  TTA: "L",
-  TTG: "L",
-  CTT: "L",
-  CTC: "L",
-  CTA: "L",
-  CTG: "L",
-  ATT: "I",
-  ATC: "I",
-  ATA: "I",
-  ATG: "M",
-  GTT: "V",
-  GTC: "V",
-  GTA: "V",
-  GTG: "V",
-  TCT: "S",
-  TCC: "S",
-  TCA: "S",
-  TCG: "S",
-  CCT: "P",
-  CCC: "P",
-  CCA: "P",
-  CCG: "P",
-  ACT: "T",
-  ACC: "T",
-  ACA: "T",
-  ACG: "T",
-  GCT: "A",
-  GCC: "A",
-  GCA: "A",
-  GCG: "A",
-  TAT: "Y",
-  TAC: "Y",
-  TAA: "*",
-  TAG: "*",
-  CAT: "H",
-  CAC: "H",
-  CAA: "Q",
-  CAG: "Q",
-  AAT: "N",
-  AAC: "N",
-  AAA: "K",
-  AAG: "K",
-  GAT: "D",
-  GAC: "D",
-  GAA: "E",
-  GAG: "E",
-  TGT: "C",
-  TGC: "C",
-  TGA: "*",
-  TGG: "W",
-  CGT: "R",
-  CGC: "R",
-  CGA: "R",
-  CGG: "R",
-  AGT: "S",
-  AGC: "S",
-  AGA: "R",
-  AGG: "R",
-  GGT: "G",
-  GGC: "G",
-  GGA: "G",
-  GGG: "G",
+const TAMAOS_CODE: Record<string, string> = {
+  ATG: "MET",
+  CCG: "PRO",
+  CGT: "ARG",
+  CAT: "HIS",
+  ATC: "ILE",
+  ACG: "THR",
+  TTA: "LEU",
+  TGC: "CYS",
+  TAT: "TYR",
+  ACT: "THR",
+  ATA: "ILE",
+  CCA: "PRO",
+  GTC: "VAL",
+  ACA: "THR",
+  TTG: "LEU",
+  TAC: "TYR",
+  TGT: "CYS",
+  GCT: "ALA",
+  ATT: "ILE",
+  GTT: "VAL",
+  TTC: "PHE",
+  TAA: "STOP",
+  TAG: "STOP",
+  TGA: "STOP",
 };
 
-const HYDROPHILIC = new Set([
-  "R",
-  "N",
-  "D",
-  "C",
-  "E",
-  "Q",
-  "G",
-  "H",
-  "K",
-  "S",
-  "T",
-  "Y",
-]);
+const BLUE_GENOME_BASE =
+  "ATGCCGCGTCATATCACGTTATGCTATACTATACCACATCGTGTCACATTGTACTGTGCT";
+const BLUE_GENOME = BLUE_GENOME_BASE.repeat(5);
 
-type BioStats = {
-  length_bp: number;
-  gc: number;
-  gc3: number;
-  at3: number;
-  stops_frac: number;
-  entropy: number;
-  unique_codons_frac: number;
-  top_codons: Array<{ codon: string; freq: number }>;
-  top_aas: Array<{ aa: string; freq: number }>;
-};
+const RED_GENOME_BASE =
+  "TTCACTATTATCTATCATTACCCACCATTATTCACTGTTGTCTGTCGTTGCCCGCCGTTA";
+const RED_GENOME = `${RED_GENOME_BASE.repeat(4)}TTCACTATTATCTATCATTA`;
 
 type Difficulty = "Chill" | "Standard" | "Hard";
 
@@ -196,14 +91,14 @@ type Pet = {
   bornAt: number;
   lastTick: number;
   isAsleep: boolean;
-  genome: number[];
+  genomeType: "blue" | "red";
   genomeSeed: number;
   generation: number;
   evolutions: number;
   species: string;
 };
 
-type Settings = {
+type SettingsState = {
   sound: boolean;
   neonGrid: boolean;
   ouroborosSkin: boolean;
@@ -212,194 +107,145 @@ type Settings = {
   difficulty: Difficulty;
 };
 
-function stripATGC(raw: string): string {
-  return (raw || "").toUpperCase().replace(/[^ATGC]/g, "");
-}
-
-function parseFASTAorPlain(raw: string): string {
-  const t = raw.trim();
-  if (t.startsWith(">"))
-    return stripATGC(
-      t
-        .split(/\r?\n/)
-        .filter((ln) => !ln.startsWith(">"))
-        .join("")
-    );
-  return stripATGC(raw);
-}
-
-function codonizeSeq(seq: string) {
-  const n = Math.floor(seq.length / 3) * 3;
-  const body = seq.slice(0, n);
-  const out: string[] = [];
-  for (let i = 0; i < body.length; i += 3) out.push(body.slice(i, i + 3));
-  return out;
-}
-
-function freqMap(items: string[]): Map<string, number> {
-  const m = new Map<string, number>();
-  for (const it of items) m.set(it, (m.get(it) || 0) + 1);
-  return m;
-}
-
-function entropy64(codonFreq: Map<string, number>): number {
-  const total = Array.from(codonFreq.values()).reduce((a, b) => a + b, 0) || 1;
-  let H = 0;
-  for (const v of codonFreq.values()) {
-    const p = v / total;
-    H += -p * Math.log2(p);
-  }
-  return H / Math.log2(64);
-}
-
-function aaFreqFromCodons(codonFreq: Map<string, number>): Map<string, number> {
-  const total = Array.from(codonFreq.values()).reduce((a, b) => a + b, 0) || 1;
-  const m = new Map<string, number>();
-  for (const [codon, cnt] of codonFreq.entries()) {
-    const aa = CODON_TABLE[codon] || "?";
-    m.set(aa, (m.get(aa) || 0) + cnt / total);
-  }
-  return m;
-}
-
-function clamp01(x: number) {
-  return Math.max(0, Math.min(1, x));
-}
-
-function scaleByte01(x: number) {
-  return Math.round(clamp01(x) * 255);
-}
-
-function modByteForRange(val: number) {
-  return Math.round(clamp01((val - 0.85) / 0.3) * 255);
-}
-
-function deriveGenomeFromSequence(seq: string): {
-  bytes: number[];
-  stats: BioStats;
-  base60: string;
-} {
-  const length_bp = seq.length;
-  const codons = codonizeSeq(seq);
-  const cm = freqMap(codons);
-  const totalCodons = codons.length || 1;
-  const A = (seq.match(/A/g) || []).length;
-  const T = (seq.match(/T/g) || []).length;
-  const G = (seq.match(/G/g) || []).length;
-  const C = (seq.match(/C/g) || []).length;
-  const gc = (G + C) / Math.max(1, length_bp);
-  let gc3n = 0;
-  let at3n = 0;
-  for (let i = 2; i < seq.length; i += 3) {
-    const b = seq[i];
-    if (b === "G" || b === "C") gc3n++;
-    else if (b === "A" || b === "T") at3n++;
-  }
-  const denom3 = gc3n + at3n || 1;
-  const gc3 = gc3n / denom3;
-  const at3 = at3n / denom3;
-  const stops =
-    (cm.get("TAA") || 0) + (cm.get("TAG") || 0) + (cm.get("TGA") || 0);
-  const stops_frac = stops / totalCodons;
-  const uniq = cm.size;
-  const unique_codons_frac = uniq / 64;
-  const H = entropy64(cm);
-  const codonEntries = Array.from(cm.entries()).sort((a, b) => b[1] - a[1]);
-  const top_codons = codonEntries
-    .slice(0, 5)
-    .map(([codon, cnt]) => ({ codon, freq: cnt / totalCodons }));
-  const aaFreq = aaFreqFromCodons(cm);
-  const top_aas = Array.from(aaFreq.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([aa, freq]) => ({ aa, freq }));
-  const hyd = Array.from(aaFreq.entries())
-    .filter(([aa]) => HYDROPHILIC.has(aa))
-    .reduce((s, [, f]) => s + f, 0);
-  const bytes = new Array(16).fill(0);
-  bytes[0] = scaleByte01(gc);
-  bytes[1] = scaleByte01((A + T) / Math.max(1, length_bp));
-  bytes[2] = scaleByte01(gc3);
-  bytes[3] = Math.floor(stops_frac * 1000) % 4;
-  bytes[4] = scaleByte01(H);
-  bytes[5] = Math.floor(hyd * 1000) % 3;
-  const hungerMod = 0.85 + 0.3 * (1 - gc);
-  const funMod = 0.85 + 0.3 * H;
-  const hygieneMod = 0.85 + 0.3 * hyd;
-  const energyMod = 0.85 + 0.3 * at3;
-  bytes[6] = modByteForRange(hungerMod);
-  bytes[7] = modByteForRange(funMod);
-  bytes[8] = modByteForRange(hygieneMod);
-  bytes[9] = modByteForRange(energyMod);
-  const xpBonus01 = unique_codons_frac;
-  const resilience01 = gc;
-  const metabolism01 = (A + T) / Math.max(1, length_bp);
-  bytes[10] = scaleByte01(xpBonus01);
-  bytes[11] = scaleByte01(resilience01);
-  bytes[12] = scaleByte01(metabolism01);
-  const thr = 20 + Math.floor(clamp01(codons.length / 500) * 15);
-  bytes[13] = Math.round(((thr - 20) / 15) * 255);
-  const mutation01 = clamp01(1 - H);
-  bytes[14] = scaleByte01(mutation01);
-  bytes[15] = unique_codons_frac > 0.75 ? 2 : unique_codons_frac > 0.5 ? 1 : 0;
-  const base60 = genomeToBase60(bytes);
-  const stats: BioStats = {
-    length_bp,
-    gc,
-    gc3,
-    at3,
-    stops_frac,
-    entropy: H,
-    unique_codons_frac,
-    top_codons,
-    top_aas,
-  };
-  return { bytes, stats, base60 };
-}
-function decodeTraits(genome: number[]) {
-  const g = genome;
-  return {
-    hue: (g[0] / 255) * 360,
-    saturation: 50 + (g[1] / 255) * 30,
-    lightness: 30 + (g[2] / 255) * 30,
-    patternType: g[3] % 4,
-    patternIntensity: g[4] / 255,
-    crestStyle: g[5] % 3,
-    hungerMod: 0.85 + (g[6] / 255) * 0.3,
-    funMod: 0.85 + (g[7] / 255) * 0.3,
-    hygieneMod: 0.85 + (g[8] / 255) * 0.3,
-    energyMod: 0.85 + (g[9] / 255) * 0.3,
-    xpBonus: (g[10] / 255) * 0.5,
-    resilience: (g[11] / 255) * 0.3,
-    metabolism: 0.85 + (g[12] / 255) * 0.3,
-    evolutionThreshold: 20 + Math.floor((g[13] / 255) * 15),
-    mutationRate: (g[14] / 255) * 0.15,
-    maxEvolutions: 2 + (g[15] % 3),
-  } as const;
-}
-
-const clamp = (v: number, min = 0, max = 100) => Math.max(min, Math.min(max, v));
-const pct = (v: number) => Math.round(clamp(v));
-const fmtAge = (ms: number) => {
-  const d = Math.floor(ms / (24 * 3600_000));
-  const h = Math.floor((ms % (24 * 3600_000)) / 3600_000);
-  return `${d}d ${h}h`;
+type Traits = {
+  hue: number;
+  saturation: number;
+  lightness: number;
+  bodyShape: number;
+  patternType: number;
+  patternIntensity: number;
+  crestStyle: number;
+  eyeStyle: number;
+  hungerMod: number;
+  funMod: number;
+  hygieneMod: number;
+  energyMod: number;
+  xpBonus: number;
+  resilience: number;
+  metabolism: number;
+  evolutionThreshold: number;
+  mutationRate: number;
+  maxEvolutions: number;
+  curiosity: number;
+  sociability: number;
+  stubbornness: number;
 };
 
-function seeded(seed: number) {
-  let x = Math.sin(seed) * 10000;
+type Mood = {
+  key: "asleep" | "ecstatic" | "happy" | "okay" | "grumpy" | "critical";
+  label: string;
+  emoji: string;
+  tone: "blue" | "emerald" | "cyan" | "amber" | "orange" | "red";
+};
+
+const STORAGE_KEY = "tamagotchy_genetic_v1";
+const DIFF: Record<Difficulty, number> = { Chill: 0.7, Standard: 1, Hard: 1.4 };
+
+function seededRandom(seed: number) {
+  let state = seed >>> 0;
   return () => {
-    x = Math.sin(x) * 10000;
+    state = (state * 1664525 + 1013904223) % 4294967296;
+    return state / 4294967296;
+  };
+}
+
+function genomeToCodons(sequence: string) {
+  const codons: string[] = [];
+  for (let i = 0; i + 3 <= sequence.length; i += 3) {
+    codons.push(sequence.substring(i, i + 3));
+  }
+  return codons;
+}
+
+function translateCodons(codons: string[]) {
+  const protein: string[] = [];
+  for (const codon of codons) {
+    const aa = TAMAOS_CODE[codon];
+    if (aa === "STOP") break;
+    protein.push(aa ?? "X");
+  }
+  return protein;
+}
+
+function generateGenomeFromSeed(seed: number, type: Pet["genomeType"]) {
+  const rng = seededRandom(seed);
+  const baseGenome = type === "blue" ? BLUE_GENOME : RED_GENOME;
+  const mutated = baseGenome.split("");
+  const mutationRate = 0.02;
+  const bases: Array<"A" | "T" | "G" | "C"> = ["A", "T", "G", "C"];
+
+  for (let i = 0; i < mutated.length; i += 1) {
+    if (rng() < mutationRate) {
+      mutated[i] = bases[Math.floor(rng() * 4)];
+    }
+  }
+
+  return mutated.join("");
+}
+
+function decodeTraitsFromProtein(protein: string[]): Traits {
+  const signature = protein.slice(0, 20).join("");
+  let hash = 0;
+  for (let i = 0; i < signature.length; i += 1) {
+    hash = ((hash << 5) - hash + signature.charCodeAt(i)) | 0;
+  }
+
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < bytes.length; i += 1) {
+    const shift = (i * 2) % 16;
+    bytes[i] = (hash >> shift) & 0xff;
+  }
+
+  return {
+    hue: (bytes[0] / 255) * 360,
+    saturation: 50 + (bytes[1] / 255) * 30,
+    lightness: 30 + (bytes[2] / 255) * 30,
+    bodyShape: bytes[1] % 3,
+    patternType: bytes[3] % 4,
+    patternIntensity: bytes[4] / 255,
+    crestStyle: bytes[5] % 3,
+    eyeStyle: bytes[15] % 3,
+    hungerMod: 0.85 + (bytes[6] / 255) * 0.3,
+    funMod: 0.85 + (bytes[7] / 255) * 0.3,
+    hygieneMod: 0.85 + (bytes[8] / 255) * 0.3,
+    energyMod: 0.85 + (bytes[9] / 255) * 0.3,
+    xpBonus: (bytes[10] / 255) * 0.5,
+    resilience: (bytes[11] / 255) * 0.3,
+    metabolism: 0.85 + (bytes[12] / 255) * 0.3,
+    evolutionThreshold: 20 + Math.floor((bytes[13] / 255) * 15),
+    mutationRate: (bytes[14] / 255) * 0.15,
+    maxEvolutions: 2 + (bytes[15] % 3),
+    curiosity: 0.1 + (bytes[3] / 255) * 0.4,
+    sociability: 0.1 + (bytes[4] / 255) * 0.4,
+    stubbornness: 0.1 + (bytes[5] / 255) * 0.4,
+  };
+}
+
+function clamp(value: number, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function pct(value: number) {
+  return Math.round(clamp(value));
+}
+
+function fmtAge(ms: number) {
+  const day = 24 * 3_600_000;
+  const days = Math.floor(ms / day);
+  const hours = Math.floor((ms % day) / 3_600_000);
+  return `${days}d ${hours}h`;
+}
+
+function seeded(seed: number) {
+  let x = Math.sin(seed) * 10_000;
+  return () => {
+    x = Math.sin(x) * 10_000;
     return x - Math.floor(x);
   };
 }
 
-const STORAGE_KEY = "tamagotchy_v2";
-const DIFF = { Chill: 0.7, Standard: 1.0, Hard: 1.4 } as const;
-
 function createDefaultPet(overrides?: Partial<Pet>): Pet {
   const now = Date.now();
-  const seed = overrides?.genomeSeed ?? now;
   const base: Pet = {
     name: "Mossy",
     hunger: 75,
@@ -411,16 +257,28 @@ function createDefaultPet(overrides?: Partial<Pet>): Pet {
     bornAt: now,
     lastTick: now,
     isAsleep: false,
-    genomeSeed: seed,
-    genome: generateGenome(seed),
+    genomeType: "blue",
+    genomeSeed: now,
     generation: 1,
     evolutions: 0,
-    species: "Gen I",
+    species: "Blue Gen I",
   };
-  return { ...base, ...overrides };
+
+  const merged: Pet = {
+    ...base,
+    ...overrides,
+  };
+
+  if (!overrides?.species) {
+    merged.species = `${
+      merged.genomeType === "blue" ? "Blue" : "Red"
+    } Gen ${merged.generation}`;
+  }
+
+  return merged;
 }
 
-const DEFAULT_SETTINGS: Settings = {
+const DEFAULT_SETTINGS: SettingsState = {
   sound: false,
   neonGrid: false,
   ouroborosSkin: true,
@@ -429,108 +287,42 @@ const DEFAULT_SETTINGS: Settings = {
   difficulty: "Standard",
 };
 
-function exportSave({
-  pet,
-  settings,
-  pulse,
-}: {
-  pet: Pet;
-  settings: Settings;
-  pulse: (m: string) => void;
-}) {
-  const payload = JSON.stringify({ pet, settings }, null, 2);
-  const blob = new Blob([payload], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `tamagotchy-save-${Date.now()}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  pulse("Save exported");
-}
-
-function importSave({
-  setPet,
-  setSettings,
-  pulse,
-}: {
-  setPet: React.Dispatch<React.SetStateAction<Pet>>;
-  setSettings: React.Dispatch<React.SetStateAction<Settings>>;
-  pulse: (m: string) => void;
-}) {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".json";
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      if (data.pet) setPet((p) => ({ ...p, ...data.pet }));
-      if (data.settings) setSettings((s) => ({ ...s, ...data.settings }));
-      pulse("Save imported");
-    } catch {
-      pulse("Failed to import save");
-    }
-  };
-  input.click();
-}
-
-function wipeSave({
-  setPet,
-  setSettings,
-  pulse,
-}: {
-  setPet: React.Dispatch<React.SetStateAction<Pet>>;
-  setSettings: React.Dispatch<React.SetStateAction<Settings>>;
-  pulse: (m: string) => void;
-}) {
-  localStorage.removeItem(STORAGE_KEY);
-  setPet(createDefaultPet());
-  setSettings({ ...DEFAULT_SETTINGS });
-  pulse("Save wiped");
-}
 export default function Tamagotchy() {
   const [pet, setPet] = useState<Pet>(() => {
     const raw =
       typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
     if (!raw) return createDefaultPet();
     try {
-      const parsed = JSON.parse(raw).pet as Pet;
-      return createDefaultPet({
-        ...parsed,
-        genome: parsed.genome || generateGenome(Date.now()),
-      });
+      const parsed = JSON.parse(raw).pet as Partial<Pet> | undefined;
+      return createDefaultPet(parsed ?? {});
     } catch {
       return createDefaultPet();
     }
   });
 
-  const [settings, setSettings] = useState<Settings>(() => {
+  const [settings, setSettings] = useState<SettingsState>(() => {
     const raw =
       typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
     if (!raw) return { ...DEFAULT_SETTINGS };
     try {
-      return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw).settings as Settings) };
+      const parsed = JSON.parse(raw).settings as Partial<SettingsState> | undefined;
+      return { ...DEFAULT_SETTINGS, ...(parsed ?? {}) };
     } catch {
       return { ...DEFAULT_SETTINGS };
     }
   });
 
   const [openSettings, setOpenSettings] = useState(false);
-  const [showDNA, setShowDNA] = useState(false);
+  const [showGenetics, setShowGenetics] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-  const [draftName, setDraftName] = useState(pet.name);
-  const [bioStats, setBioStats] = useState<BioStats | null>(null);
-  const [base60FromATGC, setBase60FromATGC] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const zipInputRef = useRef<HTMLInputElement>(null);
 
-  const traits = useMemo(() => decodeTraits(pet.genome), [pet.genome]);
-  const genomeString = useMemo(() => genomeToBase60(pet.genome), [pet.genome]);
+  const genome = useMemo(
+    () => generateGenomeFromSeed(pet.genomeSeed, pet.genomeType),
+    [pet.genomeSeed, pet.genomeType],
+  );
+  const codons = useMemo(() => genomeToCodons(genome), [genome]);
+  const protein = useMemo(() => translateCodons(codons), [codons]);
+  const traits = useMemo(() => decodeTraitsFromProtein(protein), [protein]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -538,56 +330,73 @@ export default function Tamagotchy() {
   }, [pet, settings]);
 
   const pulse = useCallback((msg: string) => {
-    setLog((prev) => [`${new Date().toLocaleTimeString()} — ${msg}`, ...prev.slice(0, 49)]);
+    setLog((prev) => [
+      `${new Date().toLocaleTimeString()} — ${msg}`,
+      ...prev.slice(0, 19),
+    ]);
   }, []);
 
   useEffect(() => {
-    const t = setInterval(() => {
+    const timer = setInterval(() => {
       setPet((prev) => {
         const now = Date.now();
         const dt = Math.max(0, now - (prev.lastTick || now));
         const minutes = dt / 60_000;
         const diffMul = DIFF[settings.difficulty];
-        const k = settings.decayRate * diffMul;
-        const sleepBoost = prev.isAsleep ? 1.6 : 1.0;
-        const sleepShield = prev.isAsleep ? 0.7 : 1.0;
+        const decay = settings.decayRate * diffMul;
+
+        const sleepBoost = prev.isAsleep ? 1.6 : 1;
+        const sleepShield = prev.isAsleep ? 0.7 : 1;
+
         const hunger = clamp(
-          prev.hunger - 1.2 * k * minutes * traits.hungerMod * sleepShield
+          prev.hunger - 1.2 * decay * minutes * traits.hungerMod * sleepShield,
         );
-        const fun = clamp(prev.fun - 1.0 * k * minutes * traits.funMod * sleepShield);
+        const fun = clamp(
+          prev.fun - 1.0 * decay * minutes * traits.funMod * sleepShield,
+        );
         const hygiene = clamp(
-          prev.hygiene - 0.8 * k * minutes * traits.hygieneMod * sleepShield
+          prev.hygiene - 0.8 * decay * minutes * traits.hygieneMod * sleepShield,
         );
         const energy = clamp(
           prev.energy +
-            0.9 * k * minutes * traits.energyMod * sleepBoost -
-            0.9 * k * minutes * traits.energyMod * (prev.isAsleep ? 0 : 1)
+            0.9 * decay * minutes * traits.energyMod * sleepBoost -
+            0.9 * decay * minutes * traits.energyMod * (prev.isAsleep ? 0 : 1),
         );
+
         const xpGain = 0.25 * minutes * (1 + traits.xpBonus);
         const xp = prev.xp + xpGain;
         const level = 1 + Math.floor(xp / 25);
-        let newGenome = prev.genome;
+
+        let newGenomeSeed = prev.genomeSeed;
         let newEvolutions = prev.evolutions;
         let newSpecies = prev.species;
         let evolved = false;
+
         if (
           level >= traits.evolutionThreshold &&
           prev.evolutions < traits.maxEvolutions &&
           level > prev.level
         ) {
-          const shouldMutate = Math.random() < traits.mutationRate;
-          if (shouldMutate) {
-            newGenome = mutateGenome(prev.genome, 0.08);
+          if (Math.random() < traits.mutationRate) {
+            newGenomeSeed = prev.genomeSeed + Math.floor(Math.random() * 1000);
             evolved = true;
           }
           newEvolutions = prev.evolutions + 1;
-          newSpecies = `Gen ${prev.generation} Evo ${newEvolutions}`;
+          newSpecies = `${
+            prev.genomeType === "blue" ? "Blue" : "Red"
+          } Gen ${prev.generation} Evo ${newEvolutions}`;
         }
-        if (evolved)
+
+        if (evolved) {
           setTimeout(
-            () => pulse(`✨ Evolution! ${prev.name} mutated into ${newSpecies}!`),
-            0
+            () =>
+              pulse(
+                `✨ Evolution! ${prev.name} mutated! Genome seed: ${newGenomeSeed}`,
+              ),
+            0,
           );
+        }
+
         return {
           ...prev,
           hunger,
@@ -597,29 +406,30 @@ export default function Tamagotchy() {
           xp,
           level,
           lastTick: now,
-          genome: newGenome,
+          genomeSeed: newGenomeSeed,
           evolutions: newEvolutions,
           species: newSpecies,
-        } as Pet;
+        };
       });
     }, settings.tickMs);
-    return () => clearInterval(t);
+
+    return () => clearInterval(timer);
   }, [settings.tickMs, settings.decayRate, settings.difficulty, traits, pulse]);
 
-  const mood = useMemo(() => {
+  const mood = useMemo<Mood>(() => {
     const { hunger, fun, hygiene, energy, isAsleep } = pet;
     const avg = (hunger + fun + hygiene + energy) / 4;
     if (isAsleep)
-      return { key: "asleep", label: "Asleep", emoji: "😴", tone: "blue" } as const;
+      return { key: "asleep", label: "Asleep", emoji: "😴", tone: "blue" };
     if (avg > 85)
-      return { key: "ecstatic", label: "Ecstatic", emoji: "🤩", tone: "emerald" } as const;
+      return { key: "ecstatic", label: "Ecstatic", emoji: "🤩", tone: "emerald" };
     if (avg > 70)
-      return { key: "happy", label: "Happy", emoji: "😊", tone: "cyan" } as const;
+      return { key: "happy", label: "Happy", emoji: "😊", tone: "cyan" };
     if (avg > 50)
-      return { key: "okay", label: "Okay", emoji: "🙂", tone: "amber" } as const;
+      return { key: "okay", label: "Okay", emoji: "🙂", tone: "amber" };
     if (avg > 30)
-      return { key: "grumpy", label: "Grumpy", emoji: "😒", tone: "orange" } as const;
-    return { key: "critical", label: "Needs care", emoji: "🥺", tone: "red" } as const;
+      return { key: "grumpy", label: "Grumpy", emoji: "😒", tone: "orange" };
+    return { key: "critical", label: "Needs care", emoji: "🥺", tone: "red" };
   }, [pet]);
 
   const skin = settings.ouroborosSkin
@@ -644,6 +454,7 @@ export default function Tamagotchy() {
     { icon: <Clock className="h-3.5 w-3.5" />, text: fmtAge(ageMs) },
     { icon: <Shield className="h-3.5 w-3.5" />, text: mood.label },
     { icon: <Dna className="h-3.5 w-3.5" />, text: pet.species },
+    { icon: <Microscope className="h-3.5 w-3.5" />, text: `${protein.length} AA` },
   ];
 
   const act = (kind: "feed" | "play" | "clean" | "sleep") => {
@@ -658,36 +469,39 @@ export default function Tamagotchy() {
     }
 
     setPet((p) => {
-      let h = p.hunger;
-      let f = p.fun;
-      let hy = p.hygiene;
-      let e = p.energy;
+      let hunger = p.hunger;
+      let fun = p.fun;
+      let hygiene = p.hygiene;
+      let energy = p.energy;
       let xp = p.xp;
 
       if (kind === "feed") {
-        h = clamp(p.hunger + 18 * traits.metabolism);
-        hy = clamp(hy - 2);
-        e = clamp(e + 4);
+        hunger = clamp(p.hunger + 18 * traits.metabolism);
+        hygiene = clamp(hygiene - 2);
+        energy = clamp(energy + 4);
         xp += 1.5 * (1 + traits.xpBonus);
       }
       if (kind === "play") {
-        f = clamp(p.fun + 18);
-        e = clamp(e - 8 * (1 - traits.resilience));
-        hy = clamp(hy - 3);
+        fun = clamp(p.fun + 18);
+        energy = clamp(energy - 8 * (1 - traits.resilience));
+        hygiene = clamp(hygiene - 3);
         xp += 1.8 * (1 + traits.xpBonus);
       }
       if (kind === "clean") {
-        hy = clamp(p.hygiene + 22);
-        f = clamp(f - 2);
+        hygiene = clamp(p.hygiene + 22);
+        fun = clamp(fun - 2);
         xp += 1.2 * (1 + traits.xpBonus);
       }
 
       pulse(
-        { feed: "Nom nom!", play: "Play time!", clean: "Fresh and shiny!", sleep: "Zzz" }[
-          kind
-        ]
+        {
+          feed: "Nom nom!",
+          play: "Play time!",
+          clean: "Fresh and shiny!",
+          sleep: "Zzz",
+        }[kind],
       );
-      return { ...p, hunger: h, fun: f, hygiene: hy, energy: e, xp } as Pet;
+      return { ...p, hunger, fun, hygiene, energy, xp };
     });
   };
 
@@ -695,168 +509,123 @@ export default function Tamagotchy() {
     const newSeed = Date.now();
     setPet(
       createDefaultPet({
-        name: draftName || "Mossy",
+        name: pet.name,
+        genomeType: pet.genomeType,
+        bornAt: Date.now(),
+        lastTick: Date.now(),
         genomeSeed: newSeed,
-        genome: generateGenome(newSeed),
         generation: pet.generation + 1,
-        species: `Gen ${pet.generation + 1}`,
-      })
+        species: `${pet.genomeType === "blue" ? "Blue" : "Red"} Gen ${
+          pet.generation + 1
+        }`,
+      }),
     );
     setLog([]);
-    pulse("New life begins ✨ Generation " + (pet.generation + 1));
+    pulse(`New life begins ✨ Generation ${pet.generation + 1}`);
   };
 
-  const copyDNA = () => {
-    navigator.clipboard.writeText(genomeString);
-    pulse("Genome copied to clipboard!");
-  };
-
-  const onATGCFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const raw = await file.text();
-      const seq = parseFASTAorPlain(raw);
-      if (!seq || seq.length < 3) {
-        pulse("No ATGC found in file.");
-        return;
-      }
-      const { bytes, stats, base60 } = deriveGenomeFromSequence(seq);
-      setPet((p) => ({
-        ...p,
-        genome: bytes,
-        evolutions: 0,
-        species: `Gen ${p.generation} Imported (ATGC)`,
-      }));
-      setBioStats(stats);
-      setBase60FromATGC(base60);
-      pulse(`Loaded ${seq.length}bp ATGC → DNA updated.`);
-    } catch {
-      pulse("Failed to load ATGC file.");
-    }
-  };
-
-  const onZipFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const JSZip = (await import("jszip")).default;
-      const zip = await JSZip.loadAsync(file);
-      let bestSeq = "";
-      await Promise.all(
-        Object.keys(zip.files).map(async (name) => {
-          const lower = name.toLowerCase();
-          if (!/\.fa(sta)?$|\.txt$/.test(lower)) return;
-          const content = await zip.files[name].async("string");
-          const seq = parseFASTAorPlain(content);
-          if (seq.length > bestSeq.length) bestSeq = seq;
-        })
-      );
-      if (bestSeq.length < 3) {
-        pulse("No usable ATGC found in ZIP.");
-        return;
-      }
-      const { bytes, stats, base60 } = deriveGenomeFromSequence(bestSeq);
-      setPet((p) => ({
-        ...p,
-        genome: bytes,
-        evolutions: 0,
-        species: `Gen ${p.generation} Imported (ZIP)`,
-      }));
-      setBioStats(stats);
-      setBase60FromATGC(base60);
-      pulse(`Loaded ZIP ATGC (${bestSeq.length}bp) → DNA updated.`);
-    } catch {
-      pulse("Failed to read ZIP (need a .fa/.fasta/.txt inside).");
-    }
-  };
-
-  const importDNA = () => {
-    const inputStr = prompt("Enter genome string (base60):");
-    if (!inputStr) return;
-    try {
-      const newGenome = base60ToGenome(inputStr.trim());
-      setPet((p) => ({
-        ...p,
-        genome: newGenome,
-        evolutions: 0,
-        species: `Gen ${p.generation} Imported`,
-      }));
-      pulse("Genome imported successfully!");
-    } catch {
-      pulse("Failed to import genome: Invalid format");
-    }
-  };
-
-  const forceMutate = () => {
+  const switchGenomeType = () => {
+    const newType: Pet["genomeType"] = pet.genomeType === "blue" ? "red" : "blue";
     setPet((p) => ({
       ...p,
-      genome: mutateGenome(p.genome, 0.15),
-      evolutions: p.evolutions + 1,
-      species: `Gen ${p.generation} Mutant`,
+      genomeType: newType,
+      genomeSeed: Date.now(),
+      species: `${newType === "blue" ? "Blue" : "Red"} Gen ${p.generation}`,
+      evolutions: 0,
     }));
-    pulse("⚡ Forced mutation applied!");
+    pulse(`Switched to ${newType.toUpperCase()} genome lineage!`);
   };
 
-  const rng = useMemo(() => seeded(pet.level * 13 + Math.floor(pet.xp)), [
-    pet.level,
-    pet.xp,
-  ]);
+  const copyGenome = () => {
+    void navigator.clipboard.writeText(genome);
+    pulse("Full genome sequence copied to clipboard!");
+  };
+
+  const rng = useMemo(
+    () => seeded(pet.level * 13 + Math.floor(pet.xp)),
+    [pet.level, pet.xp],
+  );
   const blink = pet.isAsleep ? 0 : rng() > 0.8 ? 1 : 0;
   const vib =
-    mood.key === "ecstatic" ? 1.3 : mood.key === "happy" ? 0.9 : mood.key === "critical" ? 2.0 : 0.5;
+    mood.key === "ecstatic"
+      ? 1.3
+      : mood.key === "happy"
+      ? 0.9
+      : mood.key === "critical"
+      ? 2
+      : 0.5;
 
+  const bodyLightness = Math.min(95, traits.lightness + 10);
   const bodyColor = `hsl(${traits.hue} ${traits.saturation}% ${traits.lightness}%)`;
-  const secondaryColor = `hsl(${(traits.hue + 40) % 360} ${traits.saturation}% ${Math.min(
-    95,
-    traits.lightness + 10
-  )}%)`;
+  const secondaryColor = `hsl(${(traits.hue + 40) % 360} ${traits.saturation}% ${bodyLightness}%)`;
+
+  const neonGrid = settings.neonGrid ? (
+    <div className="pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_at_center,black,transparent_70%)]">
+      <div
+        className="absolute inset-0 opacity-[0.15]"
+        style={{
+          backgroundImage:
+            "linear-gradient(transparent 31px, rgba(255,255,255,0.12) 32px), linear-gradient(90deg, transparent 31px, rgba(255,255,255,0.12) 32px)",
+          backgroundSize: "32px 32px",
+        }}
+      />
+      <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/10 to-indigo-500/0" />
+    </div>
+  ) : null;
+
   return (
     <div
       className={`relative min-h-[100svh] w-full bg-gradient-to-b ${skin.bg} selection:bg-cyan-400/20 ${skin.ink}`}
     >
-      {settings.neonGrid && <NeonGridLayer />}
+      {neonGrid}
 
       <div className="mx-auto max-w-5xl p-4 sm:p-6 md:p-8">
-        <div className="flex items-center justify-between mb-4">
+        <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Sparkles className="h-5 w-5 text-cyan-300" />
-            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">Tamagotchy</h1>
-            <span className={`text-xs px-2 py-0.5 rounded-full ${skin.chip} border`}>
-              DNA v2
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              Tamagotchy
+            </h1>
+            <span className={`rounded-full px-2 py-0.5 text-xs ${skin.chip} border`}>
+              TamaOS Genetics
             </span>
           </div>
           <div className="flex items-center gap-2">
             <Button
               size="sm"
               variant="secondary"
-              className="bg-white/5 hover:bg-white/10 border border-white/10"
-              onClick={() => setShowDNA((v) => !v)}
+              className="border border-white/10 bg-white/5 hover:bg-white/10"
+              onClick={() => setShowGenetics((v) => !v)}
             >
-              <Dna className="h-4 w-4 mr-2" />
-              Genome
+              <Microscope className="mr-2 h-4 w-4" />
+              Genetics
             </Button>
             <Button
               size="sm"
               variant="secondary"
-              className="bg-white/5 hover:bg-white/10 border border-white/10"
+              className="border border-white/10 bg-white/5 hover:bg-white/10"
               onClick={() => setOpenSettings((v) => !v)}
             >
-              <Settings className="h-4 w-4 mr-2" />
+              <Settings className="mr-2 h-4 w-4" />
               Settings
             </Button>
-            <Button size="sm" variant="outline" className="border-white/20" onClick={reset}>
-              <RotateCcw className="h-4 w-4 mr-2" /> Reset
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-white/20"
+              onClick={reset}
+            >
+              <RotateCcw className="mr-2 h-4 w-4" /> Reset
             </Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <Card className={`relative overflow-hidden ${skin.rim} bg-white/5 backdrop-blur-sm`}>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2">
                 <span className="font-semibold">{pet.name}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${skin.chip} border`}>
+                <span className={`rounded-full px-2 py-0.5 text-xs ${skin.chip} border`}>
                   {mood.emoji} {mood.label}
                 </span>
               </CardTitle>
@@ -869,11 +638,13 @@ export default function Tamagotchy() {
                   className="relative"
                 >
                   <PetSprite
+                    blink={blink}
                     bodyColor={bodyColor}
                     secondaryColor={secondaryColor}
-                    blink={blink}
                     traits={traits}
                     neon={settings.neonGrid}
+                    moodKey={mood.key}
+                    rng={rng}
                   />
                   {pet.isAsleep && (
                     <motion.div
@@ -888,13 +659,13 @@ export default function Tamagotchy() {
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
-                {statusChips.map((c, i) => (
+                {statusChips.map((chip, index) => (
                   <div
-                    key={i}
-                    className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full ${skin.chip} border`}
+                    key={index}
+                    className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-xs ${skin.chip} border`}
                   >
-                    {c.icon}
-                    <span>{c.text}</span>
+                    {chip.icon}
+                    <span>{chip.text}</span>
                   </div>
                 ))}
               </div>
@@ -932,313 +703,314 @@ export default function Tamagotchy() {
             </CardContent>
             <CardFooter className="flex flex-wrap gap-2">
               <Button className="flex-1" onClick={() => act("feed")}>
-                <UtensilsCrossed className="h-4 w-4 mr-2" /> Feed
+                <UtensilsCrossed className="mr-2 h-4 w-4" /> Feed
               </Button>
-              <Button className="flex-1" variant="secondary" onClick={() => act("play")}>
-                <PartyPopper className="h-4 w-4 mr-2" /> Play
+              <Button
+                className="flex-1"
+                variant="secondary"
+                onClick={() => act("play")}
+              >
+                <PartyPopper className="mr-2 h-4 w-4" /> Play
               </Button>
-              <Button className="flex-1" variant="outline" onClick={() => act("clean")}>
-                <SprayCan className="h-4 w-4 mr-2" /> Clean
+              <Button
+                className="flex-1"
+                variant="outline"
+                onClick={() => act("clean")}
+              >
+                <SprayCan className="mr-2 h-4 w-4" /> Clean
               </Button>
               <Button
                 className="flex-1"
                 variant={pet.isAsleep ? "destructive" : "ghost"}
                 onClick={() => act("sleep")}
               >
-                {pet.isAsleep ? <Sun className="h-4 w-4 mr-2" /> : <Moon className="h-4 w-4 mr-2" />}
+                {pet.isAsleep ? (
+                  <Sun className="mr-2 h-4 w-4" />
+                ) : (
+                  <Moon className="mr-2 h-4 w-4" />
+                )}
                 {pet.isAsleep ? "Wake" : "Sleep"}
               </Button>
             </CardFooter>
           </Card>
 
-          <Card className={`xl:col-span-2 ${skin.rim} bg-white/5`}>
+          <Card className={`bg-white/5 ${skin.rim} xl:col-span-2`}>
             <CardHeader className="pb-2">
-              <CardTitle>Status & Activity</CardTitle>
+              <CardTitle>Genetic Analysis</CardTitle>
             </CardHeader>
-            <CardContent className="pt-2 grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="lg:col-span-2">
-                <div className="h-56 overflow-y-auto rounded-md border border-white/10 p-3 bg-black/20 font-mono text-xs leading-relaxed">
-                  {log.length === 0 ? (
-                    <div className="text-white/60">No events yet. Take an action to begin!</div>
-                  ) : (
-                    <ul className="space-y-1">
-                      {log.map((line, i) => (
-                        <li key={i} className="text-white/80">
-                          {line}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <div className="mt-3 text-xs text-white/60">
-                  DNA-driven evolution • Stats affected by genome • Mutations can occur at level {traits.evolutionThreshold}
-                </div>
+            <CardContent className="pt-2">
+              <Tabs defaultValue="activity" className="w-full">
+                <TabsList className="grid w-full grid-cols-3 border-white/10 bg-black/20">
+                  <TabsTrigger value="activity">Activity Log</TabsTrigger>
+                  <TabsTrigger value="protein">Protein Sequence</TabsTrigger>
+                  <TabsTrigger value="code">Genetic Code</TabsTrigger>
+                </TabsList>
 
-                {showDNA && (
-                  <div className="mt-3 rounded-md border border-white/10 p-3 bg-black/20 space-y-2">
-                    <div className="flex items-center justify-between text-xs font-semibold text-cyan-300">
-                      <span className="flex items-center gap-2">
-                        <Dna className="h-4 w-4" /> Genome Code
+                <TabsContent value="activity" className="mt-4 space-y-4">
+                  <div className="h-56 overflow-y-auto rounded-md border border-white/10 bg-black/20 p-3 font-mono text-xs leading-relaxed">
+                    {log.length === 0 ? (
+                      <div className="text-white/60">
+                        No events yet. Take an action to begin!
+                      </div>
+                    ) : (
+                      <ul className="space-y-1">
+                        {log.map((line, i) => (
+                          <li key={i} className="text-white/80">
+                            {line}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="text-xs text-white/60">
+                    Real genetic code from TamaOS research • Protein-driven traits • {codons.length} codons → {protein.length} amino acids
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="protein" className="mt-4 space-y-4">
+                  <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="flex items-center gap-2 text-xs font-semibold text-cyan-300">
+                        <Microscope className="h-4 w-4" />
+                        Translated Protein Sequence ({protein.length} residues)
                       </span>
-                      <button onClick={copyDNA} className="text-white/70 hover:text-white">
-                        <Copy className="h-3 w-3" />
-                      </button>
+                      <Button size="sm" variant="ghost" onClick={copyGenome}>
+                        <Copy className="mr-1 h-3 w-3" /> Copy Genome
+                      </Button>
                     </div>
-                    <div className="font-mono text-xs text-white/80 break-all bg-white/5 p-2 rounded">
-                      {genomeString}
+                    <div className="h-48 overflow-y-auto font-mono text-xs leading-relaxed text-white/80">
+                      {protein.slice(0, 60).map((aa, i) => (
+                        <span
+                          key={i}
+                          className="mr-2 mb-1 inline-block rounded bg-white/5 px-1 py-0.5"
+                        >
+                          {aa}
+                        </span>
+                      ))}
+                      {protein.length > 60 && (
+                        <span className="text-white/50">
+                          ... +{protein.length - 60} more
+                        </span>
+                      )}
                     </div>
-                    <div className="grid grid-cols-3 md:grid-cols-5 gap-2 text-xs">
-                      <button
-                        onClick={importDNA}
-                        className="px-2 py-1 rounded bg-white/5 border border-white/10 hover:bg-white/10"
-                      >
-                        Import DNA
-                      </button>
-                      <button
-                        onClick={forceMutate}
-                        className="px-2 py-1 rounded bg-amber-500/20 border border-amber-500/30 hover:bg-amber-500/30"
-                      >
-                        Force Mutate
-                      </button>
-                      <button
-                        onClick={() => exportSave({ pet, settings, pulse })}
-                        className="px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/30 hover:bg-emerald-500/30"
-                      >
-                        Export Save
-                      </button>
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-500/30 hover:bg-cyan-500/30 flex items-center justify-center gap-1"
-                      >
-                        <Upload className="h-3 w-3" /> Load ATGC
-                      </button>
-                      <button
-                        onClick={() => zipInputRef.current?.click()}
-                        className="px-2 py-1 rounded bg-indigo-500/20 border border-indigo-500/30 hover:bg-indigo-500/30 flex items-center justify-center gap-1"
-                      >
-                        <Archive className="h-3 w-3" /> Load ZIP
-                      </button>
-                    </div>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".fa,.fasta,.txt"
-                      className="hidden"
-                      onChange={onATGCFileChange}
-                    />
-                    <input
-                      ref={zipInputRef}
-                      type="file"
-                      accept=".zip"
-                      className="hidden"
-                      onChange={onZipFileChange}
-                    />
+                  </div>
 
-                    <div className="text-xs text-white/60 space-y-1">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                      <div className="mb-2 text-xs font-semibold text-amber-300">
+                        Genome Stats
+                      </div>
+                      <div className="space-y-1 text-xs text-white/70">
+                        <div>
+                          Type: <span className="font-semibold uppercase text-white">{pet.genomeType}</span>
+                        </div>
+                        <div>Length: {genome.length} bp</div>
+                        <div>Codons: {codons.length}</div>
+                        <div>Seed: {pet.genomeSeed}</div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                      <div className="mb-2 text-xs font-semibold text-purple-300">
+                        Personality
+                      </div>
+                      <div className="space-y-1 text-xs text-white/70">
+                        <div>Curiosity: {Math.round(traits.curiosity * 100)}%</div>
+                        <div>Sociability: {Math.round(traits.sociability * 100)}%</div>
+                        <div>Stubbornness: {Math.round(traits.stubbornness * 100)}%</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button className="w-full" variant="secondary" onClick={switchGenomeType}>
+                    <Dna className="mr-2 h-4 w-4" /> Switch to {pet.genomeType === "blue" ? "RED" : "BLUE"} Genome Lineage
+                  </Button>
+                </TabsContent>
+
+                <TabsContent value="code" className="mt-4 space-y-4">
+                  <div className="mb-3 text-xs text-white/60">
+                    TamaOS Genetic Code: Codon → Amino Acid mapping (from Blue Snake Studios research)
+                  </div>
+                  <div className="grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded-md border border-white/10 bg-black/20 p-2">
+                    {Object.entries(TAMAOS_CODE).map(([codon, aa]) => (
+                      <div
+                        key={codon}
+                        className="flex items-center justify-between rounded bg-white/5 p-2 font-mono text-xs transition hover:bg-white/10"
+                      >
+                        <span className="font-bold text-cyan-300">{codon}</span>
+                        <span className="text-white/50">→</span>
+                        <span
+                          className={`font-semibold text-white/90 ${aa === "STOP" ? "text-red-400" : ""}`}
+                        >
+                          {aa}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </TabsContent>
+              </Tabs>
+
+              {showGenetics && (
+                <div className="mt-4 space-y-3 rounded-md border border-white/10 bg-black/20 p-3">
+                  <div className="flex items-center justify-between text-xs font-semibold text-emerald-300">
+                    <span className="flex items-center gap-2">
+                      <Code className="h-4 w-4" />
+                      Raw Genome Sequence
+                    </span>
+                  </div>
+                  <div className="max-h-32 overflow-y-auto rounded bg-white/5 p-2 font-mono text-[10px] text-white/70">
+                    {genome}
+                  </div>
+                  <div className="space-y-1 text-xs text-white/60">
+                    <div className="font-bold text-white/80">Trait Modifiers (Protein-Derived)</div>
+                    <div className="grid grid-cols-2 gap-1">
                       <div>XP Bonus: +{Math.round(traits.xpBonus * 100)}%</div>
                       <div>Resilience: {Math.round(traits.resilience * 100)}%</div>
                       <div>Metabolism: {Math.round(traits.metabolism * 100)}%</div>
-                      <div>Next Evolution: Level {traits.evolutionThreshold}</div>
-                      {base60FromATGC && (
-                        <div className="mt-2">
-                          <div className="text-cyan-300 font-semibold mb-1">
-                            Derived Base‑60 (from ATGC)
-                          </div>
-                          <div className="font-mono text-[11px] bg-white/5 p-2 rounded break-all">
-                            {base60FromATGC}
-                          </div>
-                        </div>
-                      )}
+                      <div>Evolution Level: {traits.evolutionThreshold}</div>
                     </div>
-
-                    {bioStats && (
-                      <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-                        <div className="rounded border border-white/10 p-2 bg-white/5">
-                          <div className="font-semibold text-white/80 mb-1">Genome Stats</div>
-                          <div>Length: {bioStats.length_bp} bp</div>
-                          <div>GC%: {(bioStats.gc * 100).toFixed(2)}%</div>
-                          <div>GC3%: {(bioStats.gc3 * 100).toFixed(2)}%</div>
-                          <div>AT3%: {(bioStats.at3 * 100).toFixed(2)}%</div>
-                          <div>Stops: {(bioStats.stops_frac * 100).toFixed(2)}%</div>
-                          <div>Entropy: {bioStats.entropy.toFixed(3)}</div>
-                          <div>
-                            Unique codons: {(bioStats.unique_codons_frac * 100).toFixed(1)}%
-                          </div>
-                        </div>
-                        <div className="rounded border border-white/10 p-2 bg-white/5">
-                          <div className="font-semibold text-white/80 mb-1">Top Codons & AAs</div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <div className="text-white/60 mb-1">Codons</div>
-                              <ul className="space-y-0.5">
-                                {bioStats.top_codons.map((t, i) => (
-                                  <li key={i} className="font-mono">
-                                    {t.codon} — {(t.freq * 100).toFixed(1)}%
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                            <div>
-                              <div className="text-white/60 mb-1">Amino acids</div>
-                              <ul className="space-y-0.5">
-                                {bioStats.top_aas.map((t, i) => (
-                                  <li key={i} className="font-mono">
-                                    {t.aa} — {(t.freq * 100).toFixed(1)}%
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <label className="text-xs uppercase tracking-wider text-white/60">
-                  Pet Name
-                </label>
-                <div className="flex gap-2">
-                  <Input
-                    value={draftName}
-                    onChange={(e) => setDraftName(e.target.value)}
-                    placeholder="Name your pal"
-                  />
-                  <Button
-                    variant="secondary"
-                    onClick={() => setPet((p) => ({ ...p, name: draftName }))}
-                  >
-                    Save
-                  </Button>
                 </div>
-
-                <div className="text-xs text-white/60">Generation: {pet.generation}</div>
-                <div className="text-xs text-white/60">Genome Seed: {pet.genomeSeed}</div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="outline" onClick={() => importSave({ setPet, setSettings, pulse })}>
-                    Import Save
-                  </Button>
-                  <Button variant="destructive" onClick={() => wipeSave({ setPet, setSettings, pulse })}>
-                    Wipe Save
-                  </Button>
-                </div>
-              </div>
+              )}
             </CardContent>
-          </Card>
-        </div>
-      </div>
 
-      <AnimatePresence>
-        {openSettings && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="fixed right-4 top-20 z-50 w-[320px]"
-          >
-            <Card className={`shadow-2xl ${skin.rim} bg-white/10 backdrop-blur-md`}>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Settings</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Row label="Sound">
-                  <Switch
-                    checked={settings.sound}
-                    onCheckedChange={(v: boolean) =>
-                      setSettings((s) => ({ ...s, sound: v }))
+            {openSettings && (
+              <CardContent className="border-t border-white/10 pt-0">
+                <div className="mt-4 space-y-3">
+                  <label className="text-sm font-medium">Pet name</label>
+                  <Input
+                    value={pet.name}
+                    onChange={(event) =>
+                      setPet((p) => ({
+                        ...p,
+                        name: event.target.value.slice(0, 20),
+                      }))
                     }
+                    className="border-white/10 bg-white/5"
                   />
-                </Row>
-                <Row label="Neon Grid">
-                  <Switch
-                    checked={settings.neonGrid}
-                    onCheckedChange={(v: boolean) =>
-                      setSettings((s) => ({ ...s, neonGrid: v }))
-                    }
-                  />
-                </Row>
-                <Row label="Ouroboros Skin">
-                  <Switch
-                    checked={settings.ouroborosSkin}
-                    onCheckedChange={(v: boolean) =>
-                      setSettings((s) => ({ ...s, ouroborosSkin: v }))
-                    }
-                  />
-                </Row>
 
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span>Difficulty</span>
-                    <span className="text-white/60">{settings.difficulty}</span>
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm">
+                      {settings.sound ? (
+                        <Volume2 className="h-4 w-4" />
+                      ) : (
+                        <VolumeX className="h-4 w-4" />
+                      )}
+                      Sound
+                    </div>
+                    <Switch
+                      checked={settings.sound}
+                      onCheckedChange={(value) =>
+                        setSettings((s) => ({ ...s, sound: value }))
+                      }
+                    />
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(Object.keys(DIFF) as Difficulty[]).map((d) => (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Sparkles className="h-4 w-4" /> Ouroboros skin
+                    </div>
+                    <Switch
+                      checked={settings.ouroborosSkin}
+                      onCheckedChange={(value) =>
+                        setSettings((s) => ({ ...s, ouroborosSkin: value }))
+                      }
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Swords className="h-4 w-4" /> Neon grid
+                    </div>
+                    <Switch
+                      checked={settings.neonGrid}
+                      onCheckedChange={(value) =>
+                        setSettings((s) => ({ ...s, neonGrid: value }))
+                      }
+                    />
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {["Chill", "Standard", "Hard"].map((d) => (
                       <Button
                         key={d}
                         variant={settings.difficulty === d ? "default" : "secondary"}
-                        onClick={() => setSettings((s) => ({ ...s, difficulty: d }))}
+                        size="sm"
+                        onClick={() =>
+                          setSettings((s) => ({
+                            ...s,
+                            difficulty: d as Difficulty,
+                          }))
+                        }
                       >
                         {d}
                       </Button>
                     ))}
                   </div>
-                </div>
 
-                <SliderRow
-                  label={`Tick (${settings.tickMs}ms)`}
-                  min={250}
-                  max={2000}
-                  step={50}
-                  value={settings.tickMs}
-                  onChange={(v) => setSettings((s) => ({ ...s, tickMs: v }))}
-                />
-                <SliderRow
-                  label={`Decay (${settings.decayRate.toFixed(2)})`}
-                  min={0.4}
-                  max={1.2}
-                  step={0.02}
-                  value={settings.decayRate}
-                  onChange={(v) => setSettings((s) => ({ ...s, decayRate: v }))}
-                />
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setSettings({ ...DEFAULT_SETTINGS })}
-                  >
-                    Defaults
-                  </Button>
-                  <Button onClick={() => setOpenSettings(false)}>Close</Button>
+                  <div className="space-y-2 text-xs text-white/70">
+                    <div className="flex items-center justify-between">
+                      <span>Tick (ms)</span>
+                      <Input
+                        type="number"
+                        min={250}
+                        max={2000}
+                        value={settings.tickMs}
+                        onChange={(event) =>
+                          setSettings((s) => ({
+                            ...s,
+                            tickMs: clamp(
+                              Number.parseInt(event.target.value || "1000", 10),
+                              250,
+                              2000,
+                            ),
+                          }))
+                        }
+                        className="h-8 w-28 border-white/10 bg-white/5"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Decay rate</span>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min={0.2}
+                        max={3}
+                        value={settings.decayRate}
+                        onChange={(event) =>
+                          setSettings((s) => ({
+                            ...s,
+                            decayRate: Number(event.target.value || 1),
+                          }))
+                        }
+                        className="h-8 w-28 border-white/10 bg-white/5"
+                      />
+                    </div>
+                  </div>
                 </div>
               </CardContent>
-            </Card>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            )}
+          </Card>
+        </div>
+
+        <footer className="mt-6 text-xs text-white/50">
+          <div>
+            Generation {pet.generation} • Evolutions {pet.evolutions}/
+            {traits.maxEvolutions} • Powered by TamaOS Genetic Code
+          </div>
+        </footer>
+      </div>
     </div>
   );
 }
-/********************
- * Presentational UI
- ********************/
-function NeonGridLayer() {
-  return (
-    <div className="pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_at_center,black,transparent_70%)]">
-      <div
-        className="absolute inset-0 opacity-[0.15]"
-        style={{
-          backgroundImage:
-            "linear-gradient(transparent 31px, rgba(255,255,255,0.12) 32px), linear-gradient(90deg, transparent 31px, rgba(255,255,255,0.12) 32px)",
-          backgroundSize: "32px 32px",
-        }}
-      />
-      <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/10 to-indigo-500/0" />
-    </div>
-  );
-}
+
+type PetSpriteProps = {
+  bodyColor: string;
+  secondaryColor: string;
+  blink: number;
+  traits: Traits;
+  neon: boolean;
+  moodKey: Mood["key"];
+  rng: () => number;
+};
 
 function PetSprite({
   bodyColor,
@@ -1246,86 +1018,87 @@ function PetSprite({
   blink,
   traits,
   neon,
-}: {
-  bodyColor: string;
-  secondaryColor: string;
-  blink: number;
-  traits: ReturnType<typeof decodeTraits>;
-  neon: boolean;
-}) {
+  moodKey,
+  rng,
+}: PetSpriteProps) {
   return (
     <motion.svg
       viewBox="0 0 160 160"
-      className="w-40 h-40 drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]"
+      className="h-40 w-40 drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]"
       initial={{ scale: 0.95 }}
       animate={{ scale: 1, rotate: neon ? Math.sin(Date.now() / 2000) * 0.5 : 0 }}
       transition={{ type: "spring", stiffness: 120, damping: 12 }}
     >
       <defs>
-        <radialGradient id="pet-body" cx="50%" cy="40%" r="60%">
+        <radialGradient id="pet-gradient" cx="50%" cy="40%" r="60%">
           <stop offset="0%" stopColor={bodyColor} stopOpacity="0.9" />
           <stop offset="70%" stopColor={secondaryColor} stopOpacity="0.9" />
           <stop offset="100%" stopColor="#000000" stopOpacity="0.6" />
         </radialGradient>
-        {traits.patternType === 2 && (
-          <pattern
-            id="pet-stripes"
-            width="10"
-            height="10"
-            patternUnits="userSpaceOnUse"
-            patternTransform="rotate(45)"
-          >
-            <rect
-              width="5"
-              height="10"
-              fill={secondaryColor}
-              opacity={traits.patternIntensity * 0.5}
-            />
-          </pattern>
-        )}
       </defs>
 
-      <motion.ellipse
-        cx="80"
-        cy="85"
-        rx="55"
-        ry="50"
-        fill={traits.patternType === 2 ? "url(#pet-stripes)" : "url(#pet-body)"}
-        stroke="white"
-        strokeOpacity="0.08"
-        strokeWidth="2"
-        animate={{ y: [0, -2, 0, 2, 0], rotate: [0, -1, 0, 1, 0] }}
-        transition={{ duration: 3.5, repeat: Infinity }}
-      />
-
-      {traits.patternType === 1 && (
-        <>
-          <circle
-            cx="60"
-            cy="70"
-            r="8"
-            fill={secondaryColor}
-            opacity={traits.patternIntensity * 0.6}
-          />
-          <circle
-            cx="100"
-            cy="70"
-            r="8"
-            fill={secondaryColor}
-            opacity={traits.patternIntensity * 0.6}
-          />
-          <circle
-            cx="80"
-            cy="95"
-            r="10"
-            fill={secondaryColor}
-            opacity={traits.patternIntensity * 0.5}
-          />
-        </>
+      {traits.bodyShape === 0 && (
+        <motion.ellipse
+          cx="80"
+          cy="85"
+          rx="55"
+          ry="50"
+          fill="url(#pet-gradient)"
+          stroke="white"
+          strokeOpacity="0.08"
+          strokeWidth="2"
+          animate={{ y: [0, -2, 0, 2, 0], rotate: [0, -1, 0, 1, 0] }}
+          transition={{ duration: 3.5, repeat: Infinity }}
+        />
+      )}
+      {traits.bodyShape === 1 && (
+        <motion.circle
+          cx="80"
+          cy="85"
+          r="55"
+          fill="url(#pet-gradient)"
+          stroke="white"
+          strokeOpacity="0.08"
+          strokeWidth="2"
+          animate={{ y: [0, -2, 0, 2, 0] }}
+          transition={{ duration: 3.5, repeat: Infinity }}
+        />
+      )}
+      {traits.bodyShape === 2 && (
+        <motion.rect
+          x="25"
+          y="30"
+          width="110"
+          height="110"
+          rx="25"
+          ry="25"
+          fill="url(#pet-gradient)"
+          stroke="white"
+          strokeOpacity="0.08"
+          strokeWidth="2"
+          animate={{ y: [0, -2, 0, 2, 0] }}
+          transition={{ duration: 3.5, repeat: Infinity }}
+        />
       )}
 
-      <motion.circle cx="60" cy="75" r={blink ? 1.2 : 5} fill="#0b1020" />
-      <motion.circle cx="100" cy="75" r={blink ? 1.2 : 5} fill="#0b1020" />
+      {traits.eyeStyle === 0 && (
+        <>
+          <motion.circle cx="60" cy="75" r={blink ? 1.2 : 5} fill="#0b1020" />
+          <motion.circle cx="100" cy="75" r={blink ? 1.2 : 5} fill="#0b1020" />
+        </>
+      )}
+      {traits.eyeStyle === 1 && (
+        <>
+          <motion.rect x="55" y="73" width="10" height="4" rx="1" ry="1" fill="#0b1020" />
+          <motion.rect x="95" y="73" width="10" height="4" rx="1" ry="1" fill="#0b1020" />
+        </>
+      )}
+      {traits.eyeStyle === 2 && (
+        <>
+          <motion.circle cx="60" cy="75" r={blink ? 1.2 : 2.5} fill="#0b1020" />
+          <motion.circle cx="100" cy="75" r={blink ? 1.2 : 2.5} fill="#0b1020" />
+        </>
+      )}
 
       <path
         d="M60 100 Q80 115 100 100"
@@ -1361,25 +1134,24 @@ function PetSprite({
           stroke={secondaryColor}
           strokeWidth={3}
           fill="none"
-          strokeLinecap="round"
-          animate={{ y: [0, -3, 0] }}
+          animate={{ y: [0, -2, 0] }}
           transition={{ duration: 2.6, repeat: Infinity }}
         />
       )}
 
       <AnimatePresence>
-        {(traits.patternType === 0 || traits.patternIntensity > 0.6) && (
+        {(moodKey === "ecstatic" || moodKey === "happy") && (
           <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            {[...Array(6)].map((_, i) => (
+            {Array.from({ length: 7 }).map((_, index) => (
               <motion.circle
-                key={i}
-                cx={30 + i * 18}
-                cy={40 + ((i + 1) % 3) * 20}
-                r={1.5 + (i % 3)}
-                fill={secondaryColor}
+                key={index}
+                cx={20 + rng() * 120}
+                cy={20 + rng() * 120}
+                r={1.5 + rng() * 1.5}
+                fill={bodyColor}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: [0, 1, 0] }}
-                transition={{ duration: 2 + i * 0.2, repeat: Infinity }}
+                transition={{ duration: 2 + rng() * 1.2, repeat: Infinity }}
               />
             ))}
           </motion.g>
@@ -1389,90 +1161,41 @@ function PetSprite({
   );
 }
 
-function StatBar({
-  label,
-  value,
-  icon,
-  tone,
-  modifier,
-}: {
+type StatBarProps = {
   label: string;
   value: number;
   icon?: React.ReactNode;
   tone?: "emerald" | "cyan" | "indigo" | "amber" | "red";
   modifier?: number;
-}) {
-  const t = tone ?? "cyan";
+};
+
+function StatBar({ label, value, icon, tone = "cyan", modifier }: StatBarProps) {
   const color = {
     emerald: "from-emerald-400 to-emerald-600",
     cyan: "from-cyan-400 to-cyan-600",
     indigo: "from-indigo-400 to-indigo-600",
     amber: "from-amber-400 to-amber-600",
     red: "from-rose-400 to-rose-600",
-  }[t];
+  }[tone];
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-1 text-xs">
+      <div className="mb-1 flex items-center justify-between text-xs">
         <div className="flex items-center gap-2 opacity-80">
           {icon}
-          <span>{label}</span>
+          <span>
+            {label}
+            {modifier !== undefined ? ` (${modifier.toFixed(2)}x)` : ""}
+          </span>
         </div>
         <div className="tabular-nums opacity-80">{pct(value)}%</div>
       </div>
-      <div className="relative h-3 rounded-full bg-white/5 border border-white/10 overflow-hidden">
+      <div className="relative h-3 overflow-hidden rounded-full border border-white/10 bg-white/5">
         <div
           className={`absolute inset-y-0 left-0 bg-gradient-to-r ${color}`}
           style={{ width: `${pct(value)}%` }}
         />
       </div>
-      {modifier !== undefined && (
-        <div className="mt-1 text-[10px] text-white/50">Modifier ×{modifier.toFixed(2)}</div>
-      )}
     </div>
   );
 }
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between text-xs">
-      <span>{label}</span>
-      <div className="flex items-center gap-2">{children}</div>
-    </div>
-  );
-}
-
-function SliderRow({
-  label,
-  min,
-  max,
-  step,
-  value,
-  onChange,
-}: {
-  label: string;
-  min: number;
-  max: number;
-  step: number;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <div className="space-y-2 text-xs">
-      <div className="flex items-center justify-between">
-        <span>{label}</span>
-        <span className="text-white/60">{value}</span>
-      </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-cyan-400"
-      />
-    </div>
-  );
-}
-
-
